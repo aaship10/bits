@@ -4,18 +4,19 @@ import { THRESHOLDS } from '../config';
 import { MODE_LABEL, REASON_LABEL, hourOf, labelOf, dateOf } from '../utils';
 
 export const COLORS = {
-  ink: '#14130f',
-  muted: '#6b675e',
-  grid: 'rgba(20,19,15,0.08)',
-  main: '#2b5c8a', // main grid
-  storage: '#b8690c', // renewable storage
-  critical: '#c62828', // reserved for overload / low battery
-  shade: 'rgba(184,105,12,0.10)',
-  surface: '#fbfaf7',
+  ink: '#141416',
+  muted: '#6b6a63',
+  grid: 'rgba(20,20,22,0.12)',
+  main: '#141416', // main grid
+  storage: '#2f6b4f', // renewable storage
+  critical: '#b3261e', // reserved for overload / low battery
+  shade: 'rgba(220,217,200,0.65)',
+  surface: '#fffdf1',
 };
 
 Chart.defaults.font.family = "'Inter', system-ui, sans-serif";
 Chart.defaults.font.size = 12;
+Chart.defaults.font.weight = 400;
 Chart.defaults.color = COLORS.muted;
 Chart.defaults.animation = false;
 
@@ -41,6 +42,13 @@ function useChart(build, hours, selected, onSelect) {
   }, [selected]);
 
   return canvas;
+}
+
+// Short windows: time only, with the date as a second line at the start and after midnight.
+// Long windows (all rows) keep "MM-DD HH:mm" labels.
+function axisLabels(hours, multiDay) {
+  if (hours.length > 48) return hours.map((h) => labelOf(h.timestamp, multiDay));
+  return hours.map((h, i) => (i === 0 || hourOf(h.timestamp) === 0 ? [labelOf(h.timestamp, false), h.timestamp.slice(5, 10)] : labelOf(h.timestamp, false)));
 }
 
 // Contiguous index ranges whose hour is inside 18:00-22:00.
@@ -127,7 +135,7 @@ const baseScales = (labels, yTitle, extra = {}) => ({
 
 function loadConfig(hours, sel, pick) {
   const multiDay = new Set(hours.map((h) => dateOf(h.timestamp))).size > 1;
-  const labels = hours.map((h) => labelOf(h.timestamp, multiDay));
+  const labels = axisLabels(hours, multiDay);
   const isSel = (c) => c.dataIndex === sel.current;
   const dense = hours.length > 48;
   return {
@@ -139,8 +147,8 @@ function loadConfig(hours, sel, pick) {
           label: 'Predicted demand',
           data: hours.map((h) => h.predicted_kw),
           borderColor: COLORS.ink,
-          borderWidth: 2,
-          tension: 0.25,
+          borderWidth: 1.5,
+          tension: 0.3,
           // Mode is encoded twice: colour and marker shape (circle vs diamond).
           pointStyle: (c) => (hours[c.dataIndex].grid_mode === 'RENEWABLE_STORAGE' ? 'rectRot' : 'circle'),
           pointBackgroundColor: (c) => (hours[c.dataIndex].grid_mode === 'RENEWABLE_STORAGE' ? COLORS.storage : COLORS.main),
@@ -165,7 +173,9 @@ function loadConfig(hours, sel, pick) {
         legend: { display: false },
         tooltip: {
           backgroundColor: COLORS.ink,
-          padding: 10,
+          padding: 12,
+          cornerRadius: 4,
+          titleFont: { weight: 500 },
           displayColors: false,
           callbacks: {
             title: (items) => hours[items[0].dataIndex].timestamp.slice(0, 16),
@@ -184,7 +194,7 @@ function loadConfig(hours, sel, pick) {
 
 function socConfig(hours, sel, pick) {
   const multiDay = new Set(hours.map((h) => dateOf(h.timestamp))).size > 1;
-  const labels = hours.map((h) => labelOf(h.timestamp, multiDay));
+  const labels = axisLabels(hours, multiDay);
   const lowLine = {
     id: 'lowLine',
     afterDatasetsDraw(chart) {
@@ -225,10 +235,10 @@ function socConfig(hours, sel, pick) {
           label: 'Battery SoC',
           data: hours.map((h) => h.battery_soc_pct),
           borderColor: COLORS.ink,
-          borderWidth: 2,
-          tension: 0.25,
+          borderWidth: 1.5,
+          tension: 0.3,
           fill: true,
-          backgroundColor: 'rgba(20,19,15,0.05)',
+          backgroundColor: 'rgba(20,20,22,0.05)',
           pointBackgroundColor: (c) => (hours[c.dataIndex].battery_low ? COLORS.critical : COLORS.ink),
           pointBorderColor: COLORS.surface,
           pointBorderWidth: 2,
@@ -248,7 +258,9 @@ function socConfig(hours, sel, pick) {
         legend: { display: false },
         tooltip: {
           backgroundColor: COLORS.ink,
-          padding: 10,
+          padding: 12,
+          cornerRadius: 4,
+          titleFont: { weight: 500 },
           displayColors: false,
           callbacks: {
             title: (items) => hours[items[0].dataIndex].timestamp.slice(0, 16),

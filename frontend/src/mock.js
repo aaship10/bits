@@ -117,6 +117,7 @@ export const mockApi = {
   },
   async logs(limit = 50) {
     await delay(150);
+    if (!latest) commit(SAMPLE_ROWS, 'Demo data'); // seed here too: latest() and logs() are requested together
     return { logs: logs.slice(0, limit) };
   },
   async forecast({ rows, file, all, window = 24 }) {

@@ -3,6 +3,8 @@ import { parseCsv } from '../csv';
 import { validateRows, rowsToPayload } from '../validate';
 import { SAMPLE_ROWS, IS_PLACEHOLDER } from '../sample';
 import { addHours, fromApiTs, toApiTs } from '../utils';
+import Btn from './Btn';
+import { Alert, Close, Info, Plus, Upload } from './icons';
 
 let uid = 0;
 const mk = (r = {}) => ({
@@ -112,7 +114,7 @@ export default function InputPanel({ busy, onSubmit, apiError, onClearError }) {
   const cellErr = (i, f) => checks.errors.some((e) => e.row === i && e.field === f);
 
   return (
-    <div className="card input-card">
+    <div className="panel input-card">
       <div className="tabs" role="tablist" aria-label="Input method">
         {[
           ['manual', 'Manual entry'],
@@ -123,30 +125,30 @@ export default function InputPanel({ busy, onSubmit, apiError, onClearError }) {
           </button>
         ))}
         <span className="tabs__spacer" />
-        <button className="btn btn--ghost btn--sm" onClick={loadSample}>
+        <Btn variant="line" size="sm" onClick={loadSample}>
           Load sample (24 h)
-        </button>
+        </Btn>
       </div>
 
       {IS_PLACEHOLDER && (
         <p className="note">
-          Sample is synthetic until <code>npm run sample</code> loads the real first 24 rows of sample_test_input.csv.
+          <Info size={14} /> Sample is synthetic until <code>npm run sample</code> loads the real first 24 rows of sample_test_input.csv.
         </p>
       )}
 
       {tab === 'manual' ? (
         <>
           <div className="toolbar">
-            <button className="btn btn--ghost btn--sm" onClick={addRow}>
-              + Add row
-            </button>
-            <button className="btn btn--ghost btn--sm" onClick={generate24}>
+            <Btn variant="text" onClick={addRow}>
+              <Plus size={14} /> Add row
+            </Btn>
+            <Btn variant="text" onClick={generate24}>
               Generate next 24 hours
-            </button>
-            <button className="btn btn--ghost btn--sm" onClick={() => { setRows([]); clearAll(); }} disabled={!rows.length}>
-              Clear
-            </button>
-            <span className="muted small">{rows.length} row{rows.length === 1 ? '' : 's'}</span>
+            </Btn>
+            <Btn variant="text" onClick={() => { setRows([]); clearAll(); }} disabled={!rows.length}>
+              Clear all
+            </Btn>
+            <span className="toolbar__count">{rows.length} row{rows.length === 1 ? '' : 's'}</span>
           </div>
           <div className="table-scroll table-scroll--input">
             <table className="grid-table input-table">
@@ -178,7 +180,7 @@ export default function InputPanel({ busy, onSubmit, apiError, onClearError }) {
                     ))}
                     <td>
                       <button className="icon-btn" aria-label={`Remove row ${i + 1}`} onClick={() => { setRows((rs) => rs.filter((x) => x.id !== r.id)); clearAll(); }}>
-                        ×
+                        <Close size={14} />
                       </button>
                     </td>
                   </tr>
@@ -206,17 +208,17 @@ export default function InputPanel({ busy, onSubmit, apiError, onClearError }) {
           onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && inputRef.current?.click()}
         >
           <input ref={inputRef} type="file" accept=".csv,text/csv" hidden onChange={(e) => readFile(e.target.files?.[0])} />
-          <div className="drop__icon" aria-hidden="true">↑</div>
+          <div className="drop__icon" aria-hidden="true"><Upload size={20} /></div>
           <p className="drop__title">{file ? file.name : 'Drop a CSV here, or click to browse'}</p>
-          <p className="muted small">
+          <p className="drop__sub">
             {csvInfo && !csvInfo.errors.length
               ? `${csvInfo.rows.length} rows read`
               : 'Columns: timestamp, ambient_temp_c, humidity_pct, solar_irradiance_wm2'}
           </p>
           {csvInfo && !csvInfo.errors.length && (
-            <button className="btn btn--ghost btn--sm" onClick={(e) => { e.stopPropagation(); loadCsvIntoTable(); }}>
+            <Btn variant="text" onClick={(e) => { e.stopPropagation(); loadCsvIntoTable(); }}>
               Edit these rows in the table
-            </button>
+            </Btn>
           )}
         </div>
       )}
@@ -233,9 +235,9 @@ export default function InputPanel({ busy, onSubmit, apiError, onClearError }) {
           <input type="checkbox" checked={showAll} onChange={(e) => setShowAll(e.target.checked)} />
           <span>Forecast all rows (default: first 24 hours)</span>
         </label>
-        <button className="btn btn--primary" onClick={submit} disabled={busy || (tab === 'csv' && (!file || csvInfo?.errors.length > 0))}>
-          {busy ? 'Forecasting…' : 'Run forecast →'}
-        </button>
+        <Btn variant="solid" onClick={submit} disabled={busy || (tab === 'csv' && (!file || csvInfo?.errors.length > 0))}>
+          {busy ? 'Forecasting…' : 'Run forecast'}
+        </Btn>
       </div>
     </div>
   );
@@ -244,6 +246,8 @@ export default function InputPanel({ busy, onSubmit, apiError, onClearError }) {
 function Messages({ kind, title, items }) {
   return (
     <div className={`msg msg--${kind}`} role={kind === 'error' ? 'alert' : 'status'}>
+      <Alert size={16} />
+      <div>
       <strong>{title}</strong>
       {items.length > 0 && (
         <ul>
@@ -253,6 +257,7 @@ function Messages({ kind, title, items }) {
           {items.length > 12 && <li>…and {items.length - 12} more</li>}
         </ul>
       )}
+      </div>
     </div>
   );
 }
