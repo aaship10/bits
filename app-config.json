@@ -4,7 +4,8 @@
 	"stack": "python_3_9",
 	"env_variables": {
 		"ZOHO_ACCOUNTS_URL": "https://accounts.zoho.in",
-		"STRATUS_BUCKET": "telemetry-uploads"
+		"STRATUS_BUCKET": "telemetry-uploads",
+		"STORAGE_BACKEND": "memory"
 	},
 	"memory": 512,
 	"scripts": {}

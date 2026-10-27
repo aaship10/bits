@@ -2,7 +2,6 @@
 
 Run locally:  python app.py   (port from X_ZOHO_CATALYST_LISTEN_PORT or PORT, default 5000)
 """
-import json
 import os
 from datetime import datetime, timezone
 
@@ -14,12 +13,9 @@ import quickml_client
 import uploads
 from validation import ValidationError, clean_input, parse_csv
 
-# Use Member 3's modules when present, otherwise the built-in stand-ins.
-try:
-    import controller, battery, storage  # type: ignore
-except ImportError:
-    import _fallbacks as controller
-    battery = storage = controller
+import battery
+import controller
+import storage
 
 app = Flask(__name__)
 CORS(app)
@@ -59,26 +55,17 @@ def _read_request():
     return pd.DataFrame(body["rows"]), None, "rows.json"
 
 
-def _summary(hours):
-    peak = max(hours, key=lambda h: h["predicted_kw"])
-    return {
-        "peak_kw": peak["predicted_kw"],
-        "peak_timestamp": peak["timestamp"],
-        "storage_hours": sum(h["grid_mode"] == "RENEWABLE_STORAGE" for h in hours),
-        "main_grid_hours": sum(h["grid_mode"] == "MAIN_GRID" for h in hours),
-        "overload_hours": sum(bool(h["overload_alert"]) for h in hours),
-        "min_soc_pct": min(h["battery_soc_pct"] for h in hours),
-    }
+_last_id = {"base": None, "n": 0}
 
 
-def _battery_low_events(hours):
-    events, was_low = [], False
-    for h in hours:
-        if h["battery_low"] and not was_low:
-            events.append({"timestamp": h["timestamp"], "type": "BATTERY_LOW", "level": "WARN",
-                           "message": f"Battery below 20% ({h['battery_soc_pct']}%) at {h['timestamp']}"})
-        was_low = h["battery_low"]
-    return events
+def _new_forecast_id(now):
+    """f_YYYYMMDD_HHMMSS, with a _2, _3... suffix if two forecasts land in the same second."""
+    base = "f_" + now.strftime("%Y%m%d_%H%M%S")
+    if _last_id["base"] == base:
+        _last_id["n"] += 1
+        return f"{base}_{_last_id['n']}"
+    _last_id.update(base=base, n=1)
+    return base
 
 
 @app.post("/api/forecast")
@@ -95,8 +82,7 @@ def forecast():
     df, warnings = clean_input(raw_df, window=window, all_rows=all_rows)
 
     now = datetime.now(timezone.utc)
-    forecast_id = "f_" + now.strftime("%Y%m%d_%H%M%S")
-    storage.log_event("INFO", "UPLOAD", f"Received {len(raw_df)} row(s) from {filename}; forecasting {len(df)}", forecast_id)
+    forecast_id = _new_forecast_id(now)
     if raw_bytes is not None:
         try:
             uploads.save_raw(raw_bytes, forecast_id, filename, req=request)
@@ -104,30 +90,27 @@ def forecast():
             warnings.append(f"raw upload could not be archived: {e}")
 
     preds, source, error = quickml_client.predict(df)
-    if error:
-        storage.log_event("WARN", "QUICKML_ERROR", f"Using fallback model: {error}", forecast_id)
 
     hours = df.to_dict(orient="records")
     for h, p in zip(hours, preds):
         h["predicted_kw"] = float(p)
     hours = controller.apply_rules(hours)
-    hours = battery.simulate(hours)
-    events = controller.detect_events(hours) + _battery_low_events(hours)
-    events.sort(key=lambda e: e["timestamp"])
-
-    for e in events:
-        storage.log_event(e.get("level", "INFO"), e["type"], e["message"], forecast_id)
+    hours, battery_events = battery.simulate(hours)
+    events = controller.sort_events(controller.detect_events(hours), battery_events)
 
     result = {
         "forecast_id": forecast_id,
         "generated_at": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
         "model_source": source,
         "hours": hours,
-        "events": [{"timestamp": e["timestamp"], "type": e["type"], "message": e["message"]} for e in events],
-        "summary": _summary(hours),
+        "events": events,
+        "summary": controller.summarize(hours),
         "warnings": warnings,
     }
-    storage.save_forecast(json.loads(json.dumps(result)))
+    storage.save_forecast(result)  # also writes the UPLOAD and per-event log rows
+    if error:
+        storage.log_event("WARN", "QUICKML_ERROR", f"Using fallback model: {error}", forecast_id)
+    result["events"] = [{k: e[k] for k in ("timestamp", "type", "message")} for e in events]
     return jsonify(result)
 
 

@@ -6,6 +6,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 os.environ.pop("QUICKML_ENDPOINT_URL", None)
+os.environ["STORAGE_BACKEND"] = "memory"
 import app as app_module  # noqa: E402
 
 SAMPLE = os.path.join(os.path.dirname(__file__), "..", "..", "sample_test_input.csv")
