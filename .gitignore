@@ -7,3 +7,7 @@ __pycache__/
 .venv/
 .catalyst/
 .DS_Store
+uploads/
+*.whl
+.pytest_cache/
+backend/uploads/

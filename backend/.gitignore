@@ -1,0 +1,22 @@
+# Packages installed here for AppSail (pip install -t .) must not be committed.
+# Ignore everything, then allow only our own source files.
+*
+!.gitignore
+!requirements.txt
+!README.md
+!DEPLOY.md
+!app-config.json
+!app.py
+!validation.py
+!quickml_client.py
+!uploads.py
+!_fallbacks.py
+# Member 3 / Member 1 modules
+!controller.py
+!battery.py
+!storage.py
+!features.py
+!tests/
+!tests/**
+__pycache__/
+.pytest_cache/
