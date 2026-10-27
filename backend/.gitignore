@@ -1,6 +1,3 @@
-local_store.db
-__pycache__/
-.pytest_cache/
 # Packages installed here for AppSail (pip install -t .) must not be committed.
 # Ignore everything, then allow only our own source files.
 *
@@ -13,7 +10,8 @@ __pycache__/
 !validation.py
 !quickml_client.py
 !uploads.py
-!_fallbacks.py
+!conftest.py
+!requirements-storage.txt
 # Member 3 / Member 1 modules
 !controller.py
 !battery.py

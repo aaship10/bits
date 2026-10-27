@@ -1,3 +1,0 @@
-# Only needed with STORAGE_BACKEND=catalyst (Python 3.10-3.13). The sqlite and memory backends use the standard library.
-# Member 2: merge this line into the backend's requirements.txt for the AppSail deployment.
-zcatalyst-sdk
