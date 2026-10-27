@@ -1,3 +1,6 @@
+local_store.db
+__pycache__/
+.pytest_cache/
 # Packages installed here for AppSail (pip install -t .) must not be committed.
 # Ignore everything, then allow only our own source files.
 *
