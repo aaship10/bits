@@ -2,9 +2,12 @@
 
 Per the Catalyst QuickML docs a published endpoint is a POST to the deployment URL with
 headers X-QUICKML-ENDPOINT-KEY, Authorization: Zoho-oauthtoken <token>, CATALYST-ORG and
-Environment. The docs do not show the body/response shape, so the body defaults to the
-predict.py template shape ({"data": [...]}) and the response parser accepts several
-common shapes. Adjust _build_body()/_parse_response() to match ml/QUICKML_NOTES.md.
+Environment. Confirmed shape (ml/QUICKML_NOTES.md): ONE row per call,
+  request  {"data": {<38 feature columns from features.build_features>}}
+  response {"result": [<kW>]}
+So a forecast of N rows costs N endpoint calls (the free tier allows only ~500 in total).
+On HTTP 401/402/403/429 (auth or quota) the remaining calls are cancelled and the ridge
+fallback is used for the whole request.
 
 Environment variables (names only):
   QUICKML_ENDPOINT_URL        deployment URL (unset -> fallback model)
@@ -14,18 +17,23 @@ Environment variables (names only):
   QUICKML_ACCESS_TOKEN        static token (expires about hourly), or instead:
   QUICKML_CLIENT_ID / QUICKML_CLIENT_SECRET / QUICKML_REFRESH_TOKEN  to auto-refresh
   ZOHO_ACCOUNTS_URL           default https://accounts.zoho.com (change per data centre)
+  QUICKML_WORKERS             parallel calls (default 8)
 """
 import os
 import sys
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 import pandas as pd
 import requests
 
+from features import build_features
+
 TIMEOUT_S = 30
-BATCH_SIZE = int(os.environ.get("QUICKML_BATCH_SIZE", "500"))
+WORKERS = int(os.environ.get("QUICKML_WORKERS", "8"))
+FATAL_STATUS = (401, 402, 403, 429)  # auth / quota: retrying cannot help, stop calling
 
 _token = {"value": None, "expires": 0.0}
 _token_lock = threading.Lock()
@@ -74,17 +82,58 @@ def _headers():
     return h
 
 
+# Ridge fallback fitted by ml/train_local.py on all of train_telemetry.csv (same values as the
+# root predict.py). Validation RMSE about 9 kW.
+RIDGE_INTERCEPT = 160.18371
+RIDGE_COEFS = {
+    "hour_0": -46.777106,
+    "hour_1": -45.243388,
+    "hour_2": -44.18291,
+    "hour_3": -44.835844,
+    "hour_4": -45.41369,
+    "hour_5": -45.677244,
+    "hour_6": -3.3389854,
+    "hour_7": 36.167301,
+    "hour_8": 36.701415,
+    "hour_9": 37.320973,
+    "hour_10": 7.0194601,
+    "hour_11": 6.2058305,
+    "hour_12": 5.3835603,
+    "hour_13": 6.7146491,
+    "hour_14": 6.7334625,
+    "hour_15": 6.5723386,
+    "hour_16": 7.6656168,
+    "hour_17": 6.8402642,
+    "hour_18": 27.102203,
+    "hour_19": 28.251806,
+    "hour_20": 28.692995,
+    "hour_21": 27.902016,
+    "hour_22": 27.217423,
+    "hour_23": -26.104152,
+    "is_evening": 33.663353,
+    "cooling_deg": 15.551267,
+    "temp_x_humidity": 0.028840355,
+    "ambient_temp_c": -2.2780669,
+    "humidity_pct": -0.27209847,
+    "solar_irradiance_wm2": 0.012706795,
+    "cooling_x_evening": -0.078812325,
+    "cooling_x_humidity": -0.13039219,
+    "temp_roll3": 0.19234891,
+    "temp_roll24": -0.3395806,
+    "solar_roll3": -0.0097131861,
+}
+
+
 def fallback_predict(df: pd.DataFrame) -> np.ndarray:
-    """Placeholder model (same formula as the predict.py template). Replace with the
-    ridge coefficients from Member 1's predict.py once available."""
-    hours = pd.to_datetime(df["timestamp"]).dt.hour
-    base = 120.0 + 30.0 * np.sin(2 * np.pi * (hours - 6) / 24)
-    cooling = np.maximum(0.0, df["ambient_temp_c"] - 24.0) * 8.5
-    return np.clip((base + cooling).values.astype(float), 0, 500)
+    X = build_features(df)
+    y = np.full(len(X), RIDGE_INTERCEPT, dtype=float)
+    for name, w in RIDGE_COEFS.items():
+        y += w * X[name].to_numpy()
+    return np.clip(y, 0, 500)
 
 
-def _build_body(batch: pd.DataFrame) -> dict:
-    return {"data": batch.to_dict(orient="records")}
+def _build_body(row: dict) -> dict:
+    return {"data": row}
 
 
 def _parse_response(j, n: int) -> np.ndarray:
@@ -104,18 +153,27 @@ def _parse_response(j, n: int) -> np.ndarray:
     raise ValueError("unrecognised response shape")
 
 
-def _call_endpoint(batch: pd.DataFrame) -> np.ndarray:
+def _call_row(row: dict, headers: dict, abort: threading.Event) -> float:
+    """One endpoint call for one feature row; one retry on ordinary errors."""
     last = None
-    for _ in range(2):  # one retry
+    for _ in range(2):
+        if abort.is_set():
+            raise RuntimeError("cancelled after an earlier failure")
         try:
-            r = requests.post(endpoint_url(), json=_build_body(batch), headers=_headers(), timeout=TIMEOUT_S)
+            r = requests.post(endpoint_url(), json=_build_body(row), headers=headers, timeout=TIMEOUT_S)
+            if r.status_code in FATAL_STATUS:
+                abort.set()
+                raise RuntimeError(f"HTTP {r.status_code} from QuickML: {str(getattr(r, 'text', ''))[:200]}")
             r.raise_for_status()
-            preds = _parse_response(r.json(), len(batch))
-            if len(preds) != len(batch) or not np.isfinite(preds).all():
-                raise ValueError("endpoint returned the wrong number of predictions or non-finite values")
-            return preds
+            preds = _parse_response(r.json(), 1)
+            if len(preds) != 1 or not np.isfinite(preds).all():
+                raise ValueError("endpoint returned the wrong number of predictions or a non-finite value")
+            return float(preds[0])
         except Exception as e:  # noqa: BLE001
             last = e
+            if abort.is_set():
+                break
+    abort.set()  # stop spending calls on the remaining rows
     raise last
 
 
@@ -124,8 +182,12 @@ def predict(df: pd.DataFrame):
     if not endpoint_url():
         return fallback_predict(df), "fallback", "QUICKML_ENDPOINT_URL is not set"
     try:
-        parts = [_call_endpoint(df.iloc[i:i + BATCH_SIZE]) for i in range(0, len(df), BATCH_SIZE)]
-        return np.clip(np.concatenate(parts), 0, 500), "quickml", None
+        rows = build_features(df).to_dict(orient="records")
+        headers = _headers()  # token refresh happens once, not in every worker thread
+        abort = threading.Event()  # per request, so concurrent requests do not cancel each other
+        with ThreadPoolExecutor(max_workers=WORKERS) as pool:  # map keeps the row order
+            vals = list(pool.map(lambda r: _call_row(r, headers, abort), rows))
+        return np.clip(np.array(vals, dtype=float), 0, 500), "quickml", None
     except Exception as e:  # noqa: BLE001
         print(f"WARNING: QuickML call failed, using fallback model: {e}", file=sys.stderr, flush=True)
         return fallback_predict(df), "fallback", str(e)
