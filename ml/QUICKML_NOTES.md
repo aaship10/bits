@@ -6,8 +6,8 @@
 | Local best model | Ridge on standardised features, one-hot hour + cooling terms |
 | Validation RMSE (train earliest 80%, validate latest 20%, 2015-05-14 .. 06-16) | **9.41** (RF 13.72, GB 11.76, predict-the-mean 72.81) |
 | Heat extrapolation (train T<=30 C, test T>31 C) | **ridge 10.57**, RF 34.15, GB 38.58 |
-| QuickML published model RMSE | **TODO** (fill in after training; it must beat 9.41, or at least match it) |
-| Published endpoint URL | **TODO** (never commit credentials) |
+| QuickML published model RMSE | **9.04** (Ridge on QuickML split; local time-based ridge 9.41) |
+| Published endpoint URL | `https://api.catalyst.zoho.in/quickml/v1/project/105520000000013050/endpoints/predict` (URL only; keys and tokens stay in env vars) |
 
 Why ridge: demand = hourly profile + a roughly linear cooling load above ~24 C (~7 kW per C).
 Trees cannot extrapolate beyond the training temperatures and 37% of `sample_test_input.csv` is
@@ -37,24 +37,24 @@ Source: https://docs.catalyst.zoho.com/en/quickml/help/pipeline-endpoints/
   (POST `{accounts host}/oauth/v2/token`, grant_type=refresh_token).
 - SDK docs say request keys must match the model's feature names.
 
-**Not in the docs, read from the endpoint's console page and fill in here:**
-- [ ] exact request body (single object vs list of rows, wrapper key such as `data`)
-- [ ] exact response body (where the numbers are)
-- [ ] row limit per request (`QUICKML_BATCH_SIZE`, default 50)
-- [ ] access token lifetime
-- [ ] data centre (.com / .in / .eu ...) -> `QUICKML_ACCOUNTS_URL`
+**Confirmed from the console's sample call (QuickML Ridge model, endpoint tested 2026-10-28):**
+- Request body: ONE row per call, `{"data": {"hour": 9, "hour_sin": 0.7071, ..., "solar_roll3": 148}}`
+  with the 38 feature names above as keys.
+- Response body: `{"result": [174.80083164843614]}` (a one-element list per call).
+- Check row (hour 9, T 14.17, humidity 76.1, solar 221): QuickML 174.80 vs local ridge 174.62.
+- QuickML model: Ridge (alpha 1), RMSE 9.0371, MAE 7.29, R2 0.9673 on QuickML's own held-out split
+  (probably random, so a little optimistic next to the time-based 9.41 above).
 
-`predict.py` currently sends `{"data": [ {feature: value, ...}, ... ]}` (the starter template's
-format) and accepts `predictions` / `result` / bare lists in the reply. Only `_build_payload` and
-`_parse_response` need editing once the real shapes are known.
+**Still to fill in after publishing:**
+- [ ] deployment URL / row or rate limit / token lifetime
+- [ ] data centre: IN (India) -> `QUICKML_ACCOUNTS_URL=https://accounts.zoho.in`
 
-### Example request/response
-TODO paste the console's sample call here (redact keys and tokens).
+`predict.py` sends one request per row (8 parallel workers, `QUICKML_WORKERS`) and parses `result[0]`.
 
 ## Environment variables (names only)
 `QUICKML_ENDPOINT_URL, QUICKML_ENDPOINT_KEY, QUICKML_CATALYST_ORG, QUICKML_ENVIRONMENT,
 QUICKML_ACCESS_TOKEN` or `QUICKML_CLIENT_ID / QUICKML_CLIENT_SECRET / QUICKML_REFRESH_TOKEN`,
-`QUICKML_ACCOUNTS_URL, QUICKML_BATCH_SIZE`
+`QUICKML_ACCOUNTS_URL, QUICKML_WORKERS`
 
 ## Question for the organizers
 > Graders run `python predict.py` against our published QuickML endpoint. The endpoint needs a

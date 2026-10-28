@@ -6,24 +6,26 @@ to a ridge model whose coefficients are pasted below, and prints a loud WARNING 
 Configuration (environment variables; never commit values):
   QUICKML_ENDPOINT_URL   deployment URL of the published endpoint (overrides the constant below)
   QUICKML_ENDPOINT_KEY   value for the X-QUICKML-ENDPOINT-KEY header
-  QUICKML_CATALYST_ORG   value for the CATALYST-ORG header
+  QUICKML_CATALYST_ORG   value for the CATALYST-ORG header (alias: CATALYST_ORG_ID)
   QUICKML_ENVIRONMENT    "Development" or "Production" (default Production)
   QUICKML_ACCESS_TOKEN   a ready OAuth access token, OR the refresh-flow trio:
   QUICKML_CLIENT_ID / QUICKML_CLIENT_SECRET / QUICKML_REFRESH_TOKEN
-  QUICKML_ACCOUNTS_URL   token host (default https://accounts.zoho.com; use .in/.eu/... per data centre)
-  QUICKML_BATCH_SIZE     rows per request (default 50)
+  QUICKML_ACCOUNTS_URL   token host (default https://accounts.zoho.com; use .in/.eu/... per data centre; alias ZOHO_ACCOUNTS_URL)
+  QUICKML_WORKERS        parallel requests (default 8); the endpoint takes one row per call
 Usage: python predict.py --input sample_test_input.csv --output predictions.csv
 """
 import argparse
 import os
 import sys
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 import pandas as pd
 import requests
 
-QUICKML_ENDPOINT_URL = "YOUR_PUBLISHED_QUICKML_ENDPOINT_URL_HERE"
+QUICKML_ENDPOINT_URL = "https://api.catalyst.zoho.in/quickml/v1/project/105520000000013050/endpoints/predict"
 TIMEOUT_S = 30
 CLIP_KW = (0.0, 500.0)
 
@@ -135,6 +137,11 @@ def _warn(msg):
 _token_cache = {"value": None, "expires": 0.0}
 
 
+def _env(*names, default=""):
+    """First non-empty env var among `names` (backend/quickml_client.py uses the 2nd names)."""
+    return next((os.environ[n] for n in names if os.environ.get(n)), default)
+
+
 def _access_token():
     static = os.environ.get("QUICKML_ACCESS_TOKEN")
     cid, secret, refresh = (os.environ.get(k) for k in
@@ -142,7 +149,7 @@ def _access_token():
     if cid and secret and refresh:
         if _token_cache["value"] and time.time() < _token_cache["expires"] - 60:
             return _token_cache["value"]
-        host = os.environ.get("QUICKML_ACCOUNTS_URL", "https://accounts.zoho.com").rstrip("/")
+        host = _env("QUICKML_ACCOUNTS_URL", "ZOHO_ACCOUNTS_URL", default="https://accounts.zoho.com").rstrip("/")
         r = requests.post(f"{host}/oauth/v2/token", timeout=TIMEOUT_S, data={
             "grant_type": "refresh_token", "client_id": cid, "client_secret": secret,
             "refresh_token": refresh})
@@ -164,13 +171,15 @@ def _headers():
          "Environment": os.environ.get("QUICKML_ENVIRONMENT", "Production")}
     if os.environ.get("QUICKML_ENDPOINT_KEY"):
         h["X-QUICKML-ENDPOINT-KEY"] = os.environ["QUICKML_ENDPOINT_KEY"]
-    if os.environ.get("QUICKML_CATALYST_ORG"):
-        h["CATALYST-ORG"] = os.environ["QUICKML_CATALYST_ORG"]
+    org = _env("QUICKML_CATALYST_ORG", "CATALYST_ORG_ID")
+    if org:
+        h["CATALYST-ORG"] = org
     return h
 
 
-def _build_payload(feature_rows):
-    return {"data": feature_rows}  # TODO confirm against the endpoint's sample request
+def _build_payload(feature_row):
+    # Confirmed from the endpoint's sample request: ONE row per call, {"data": {feature: value}}.
+    return {"data": feature_row}
 
 
 def _parse_response(body, n):
@@ -194,27 +203,37 @@ def _parse_response(body, n):
     return np.array(vals, dtype=float)
 
 
+_abort = threading.Event()  # set on the first failed row so queued requests stop (saves quota)
+
+
+def _post_row(url, row):
+    if _abort.is_set():
+        raise RuntimeError("aborted after an earlier failure")
+    for attempt in (1, 2):  # one retry
+        try:
+            r = requests.post(url, json=_build_payload(row), headers=_headers(), timeout=TIMEOUT_S)
+            if r.status_code in (401, 402, 403, 429):  # auth / quota problems: retrying cannot help
+                _abort.set()
+                raise RuntimeError(f"HTTP {r.status_code} {r.text[:200]}")
+            r.raise_for_status()
+            return float(_parse_response(r.json(), 1)[0])
+        except Exception:  # noqa: BLE001
+            if attempt == 2 or _abort.is_set():
+                _abort.set()
+                raise
+            time.sleep(1.5)
+
+
 def _quickml_predict(input_df):
     url = os.environ.get("QUICKML_ENDPOINT_URL", QUICKML_ENDPOINT_URL)
     if not url or url.startswith("YOUR_"):
         raise RuntimeError("QUICKML_ENDPOINT_URL is not configured")
-    feats = build_features(input_df)
-    batch = int(os.environ.get("QUICKML_BATCH_SIZE", 50))
-    parts = []
-    for i in range(0, len(feats), batch):
-        rows = feats.iloc[i:i + batch].to_dict(orient="records")
-        for attempt in (1, 2):  # one retry
-            try:
-                r = requests.post(url, json=_build_payload(rows), headers=_headers(),
-                                  timeout=TIMEOUT_S)
-                r.raise_for_status()
-                parts.append(_parse_response(r.json(), len(rows)))
-                break
-            except Exception as e:  # noqa: BLE001
-                if attempt == 2:
-                    raise RuntimeError(f"batch starting at row {i}: {e}") from e
-                time.sleep(1.5)
-    return np.concatenate(parts)
+    rows = build_features(input_df).to_dict(orient="records")
+    _headers()  # fetch/refresh the token once up front, not from every worker thread
+    _abort.clear()
+    workers = int(os.environ.get("QUICKML_WORKERS", 8))
+    with ThreadPoolExecutor(max_workers=workers) as pool:  # map keeps the input row order
+        return np.array(list(pool.map(lambda r: _post_row(url, r), rows)), dtype=float)
 
 
 def predict(input_df: pd.DataFrame):
