@@ -40,3 +40,13 @@ export function relTime(iso) {
   if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
   return new Date(t).toLocaleString();
 }
+
+export const EVENT_LABEL = { MODE_SWITCH: 'Switch', OVERLOAD: 'Overload', BATTERY_LOW: 'Battery low' };
+
+// "MAIN_GRID -> RENEWABLE_STORAGE (evening_window)" -> "Main grid → Renewable storage (Evening window 18-22)"
+export function prettyEvent(message) {
+  return String(message || '')
+    .replace(/RENEWABLE_STORAGE|MAIN_GRID/g, (m) => MODE_LABEL[m])
+    .replace(/\((demand_over_160|evening_window|both|normal)\)/g, (_, r) => `(${REASON_LABEL[r]})`)
+    .replace(/\s*->\s*/g, ' → ');
+}

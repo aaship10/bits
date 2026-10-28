@@ -238,8 +238,14 @@ button { font: inherit; color: inherit; }
 .figure__sub { font-size: .85rem; opacity: .65; }
 .figure--bad .figure__v { color: var(--red); }
 .events { display: flex; flex-wrap: wrap; gap: .5rem 1rem; align-items: center; margin-top: 2rem; font-size: .85rem; }
-.event { padding: .3rem .7rem; border: 1px solid var(--dark-20); border-radius: var(--radius); }
-.event b { font-weight: 600; margin-right: .35rem; font-variant-numeric: tabular-nums; }
+.event { display: inline-flex; align-items: baseline; gap: .6rem; padding: .35rem .7rem; border: 1px solid var(--dark-20); border-radius: var(--radius); background: transparent; font-size: .85rem; text-align: left; cursor: pointer; transition: background .2s, border-color .2s; }
+.event:hover { border-color: var(--dark); background: var(--cream); }
+.event b { font-weight: 600; font-variant-numeric: tabular-nums; }
+.event__type { font-size: .675rem; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; opacity: .6; }
+.event--overload { border-color: rgba(179, 38, 30, .45); }
+.event--overload .event__type { color: var(--red); opacity: 1; }
+.event--battery_low { border-color: rgba(95, 66, 66, .45); }
+.event--battery_low .event__type { color: var(--brown); opacity: 1; }
 .meta-row { display: flex; flex-wrap: wrap; justify-content: space-between; gap: .5rem 1.5rem; font-size: .8125rem; opacity: .7; padding-bottom: .9rem; border-bottom: 1px dashed var(--dark-20); }
 
 /* Gauge */

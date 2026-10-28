@@ -22,7 +22,15 @@
           "idx": 1,
           "id": "60093568394",
           "name": "Development",
-          "type": 3
+          "type": 3,
+          "env_status": "Active",
+          "project_details": {
+            "project_name": "hacksphere-energy",
+            "id": "105520000000013050",
+            "project_type": "Live"
+          },
+          "is_default": true,
+          "action_required": false
         }
       ]
     }

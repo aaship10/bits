@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from './api';
 import { API_BASE_URL, REFRESH_MS, USE_MOCK } from './config';
-import { fmt, timeOf, relTime } from './utils';
+import { fmt, timeOf, relTime, prettyEvent, EVENT_LABEL } from './utils';
 import Btn from './components/Btn';
 import InputPanel from './components/InputPanel';
 import { LoadChart, SocChart } from './components/charts';
@@ -79,10 +79,15 @@ export default function App() {
   const [light, setLight] = useState(false);
   const busyRef = useRef(false);
   const idRef = useRef(null);
+  const warningsRef = useRef({}); // /api/forecast/latest does not return warnings, so keep them per forecast
 
   const setErr = (k, v) => setErrors((e) => ({ ...e, [k]: v }));
 
   const adopt = useCallback((f) => {
+    if (f) {
+      if (f.warnings?.length) warningsRef.current[f.forecast_id] = f.warnings;
+      else if (warningsRef.current[f.forecast_id]) f = { ...f, warnings: warningsRef.current[f.forecast_id] };
+    }
     setForecast(f);
     // Only reset the cursor when a different forecast arrives, not on every 30 s refresh.
     if (f && f.forecast_id !== idRef.current) {
@@ -321,12 +326,18 @@ export default function App() {
               <Tiles summary={s} />
               {forecast.events?.length > 0 && (
                 <div className="events">
-                  <span className="label">Mode switches</span>
-                  {forecast.events.map((e, i) => (
-                    <span key={i} className="event">
-                      <b>{timeOf(e.timestamp)}</b> {e.message}
-                    </span>
-                  ))}
+                  <span className="label">Events</span>
+                  {forecast.events.slice(0, 16).map((e, i) => {
+                    const at = hours.findIndex((h) => h.timestamp.slice(0, 16) === String(e.timestamp).slice(0, 16));
+                    return (
+                      <button key={i} className={`event event--${String(e.type).toLowerCase()}`} onClick={() => at >= 0 && jump(at)} title="Jump to this hour">
+                        <b>{timeOf(e.timestamp)}</b>
+                        <span className="event__type">{EVENT_LABEL[e.type] || e.type}</span>
+                        {prettyEvent(e.message)}
+                      </button>
+                    );
+                  })}
+                  {forecast.events.length > 16 && <span className="label">+{forecast.events.length - 16} more</span>}
                 </div>
               )}
             </>

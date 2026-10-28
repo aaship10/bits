@@ -63,6 +63,12 @@ function build(rows, source) {
         message: `${hours[i - 1].grid_mode} -> ${h.grid_mode} (${h.mode_reason})`,
       });
     }
+    if (h.overload_alert) {
+      events.push({ timestamp: h.timestamp, type: 'OVERLOAD', message: `Critical overload: predicted ${h.predicted_kw.toFixed(2)} kW >= 200 kW` });
+    }
+    if (h.battery_low && !(i > 0 && hours[i - 1].battery_low)) {
+      events.push({ timestamp: h.timestamp, type: 'BATTERY_LOW', message: `Battery low: state of charge ${h.battery_soc_pct.toFixed(2)}% is below 20%` });
+    }
   });
   const peak = hours.reduce((a, b) => (b.predicted_kw > a.predicted_kw ? b : a), hours[0]);
   return {
@@ -113,7 +119,7 @@ export const mockApi = {
   async latest() {
     await delay(200);
     if (!latest) commit(SAMPLE_ROWS, 'Demo data');
-    return latest;
+    return { ...latest, warnings: [] }; // like the real backend, latest does not return warnings
   },
   async logs(limit = 50) {
     await delay(150);

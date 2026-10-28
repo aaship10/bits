@@ -4,5 +4,11 @@
       "source": ".",
       "name": "hacksphere-api"
     }
+  ],
+  "slate": [
+    {
+      "name": "hacksphere-ui",
+      "source": "frontend"
+    }
   ]
 }
