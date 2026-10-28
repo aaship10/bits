@@ -1,0 +1,13 @@
+node_modules/
+dist/
+.env
+.env.*
+*.pem
+__pycache__/
+.venv/
+.catalyst/
+.DS_Store
+uploads/
+*.whl
+.pytest_cache/
+backend/uploads/
